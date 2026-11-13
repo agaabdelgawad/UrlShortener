@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
 using UrlShortener.WriteApi.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +19,12 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    app.MapScalarApiReference(options =>
+    {
+        options.WithTitle("URL Shortener Write API")
+               .WithTheme(ScalarTheme.DeepSpace);
+    });
 }
 
 app.UseHttpsRedirection();
