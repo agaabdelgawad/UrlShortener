@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using StackExchange.Redis;
+using UrlShortener.ReadApi.DTOs;
 
 namespace UrlShortener.ReadApi.Controllers
 {
@@ -30,19 +31,31 @@ namespace UrlShortener.ReadApi.Controllers
             }
 
             using var sqlConnection = new SqlConnection(_sqlConnectionString);
-            var query = "SELECT OriginalUrl FROM Urls WHERE ShortUrl = @ShortUrl";
+            var query = "SELECT OriginalUrl, ExpirationDate, IsDeleted FROM Urls WHERE ShortUrl = @ShortUrl";
+            var url = await sqlConnection.QuerySingleOrDefaultAsync<UrlResponseDto>(query, new { ShortUrl = shortUrl });
 
-            var originalUrl = await sqlConnection.QuerySingleOrDefaultAsync<string>(
-                query, new { ShortUrl = shortUrl });
-
-            if (originalUrl == null)
+            if (url == null || url.IsDeleted)
             {
-                return NotFound(new { error = "Short URL not found." });
+                return NotFound(new { error = "Url not found." });
             }
 
-            await _redisDb.StringSetAsync(shortUrl, originalUrl, TimeSpan.FromHours(24));
+            if (url.ExpirationDate.HasValue && url.ExpirationDate.Value < DateTime.UtcNow)
+            {
+                return StatusCode(StatusCodes.Status410Gone, new { error = "This link has expired." });
+            }
 
-            return Redirect(originalUrl);
+            //
+            TimeSpan cacheExpiry = TimeSpan.FromHours(24);
+            if (url.ExpirationDate.HasValue)
+            {
+                var timeUntilExpiration = url.ExpirationDate.Value - DateTime.UtcNow;
+                cacheExpiry = timeUntilExpiration < cacheExpiry ? timeUntilExpiration : cacheExpiry;
+            }
+            //
+
+            await _redisDb.StringSetAsync(shortUrl, url.OriginalUrl, cacheExpiry);
+
+            return Redirect(url.OriginalUrl);
         }
     }
 }

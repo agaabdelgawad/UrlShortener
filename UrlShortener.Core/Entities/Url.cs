@@ -11,6 +11,7 @@ namespace UrlShortener.Core.Entities
         public string OriginalUrl { get; set; } = string.Empty;
         public DateTime CreationDate { get; set; } = DateTime.UtcNow;
         public DateTime? ExpirationDate { get; set; }
+        public bool IsDeleted { get; set; } = false;
         // public string UserId { get; set; }
     }
 }

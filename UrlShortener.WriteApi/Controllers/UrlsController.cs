@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using StackExchange.Redis;
 using System.Buffers.Text;
 using UrlShortener.Core.Entities;
 using UrlShortener.Core.Utils;
@@ -12,8 +13,19 @@ namespace UrlShortener.WriteApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class UrlsController (AppDbContext _context, IConfiguration _configuration) : ControllerBase
+    public class UrlsController : ControllerBase
     {
+        private readonly AppDbContext _context;
+        private readonly IConfiguration _configuration;
+        private readonly IDatabase _redisDb;
+
+        public UrlsController(AppDbContext context, IConfiguration configuration, IConnectionMultiplexer redisMuxer)
+        {
+            _context = context;
+            _configuration = configuration;
+            _redisDb = redisMuxer.GetDatabase();
+        }
+
         [HttpPost]
         public async Task<IActionResult> ShortenUrl([FromBody] ShortenUrlRequestDto request)
         {
@@ -113,6 +125,42 @@ namespace UrlShortener.WriteApi.Controllers
             }
 
             return nextValue;
+        }
+
+        [HttpDelete("{shortUrl}")]
+        public async Task<IActionResult> DeleteUrl(string shortUrl)
+        {
+            var url = await _context.Urls.FirstOrDefaultAsync(u => u.ShortUrl == shortUrl);
+
+            if (url == null || url.IsDeleted)
+            {
+                return NotFound("Url not found or already deleted.");
+            }
+
+            url.IsDeleted = true; // Soft Delete
+            await _context.SaveChangesAsync();
+
+            await _redisDb.KeyDeleteAsync(shortUrl);
+
+            return Ok("Url deleted successfully.");
+        }
+
+        [HttpPatch("{shortUrl}/expiration")]
+        public async Task<IActionResult> UpdateExpiration(string shortUrl, [FromBody] UpdateExpirationDto dto)
+        {
+            var url = await _context.Urls.FirstOrDefaultAsync(u => u.ShortUrl == shortUrl);
+
+            if (url == null || url.IsDeleted)
+            {
+                return NotFound("Url not found.");
+            }
+
+            url.ExpirationDate = dto.NewExpirationDate;
+            await _context.SaveChangesAsync();
+
+            await _redisDb.KeyDeleteAsync(shortUrl);
+
+            return Ok("Expiration date updated successfully.");
         }
     }
 }
