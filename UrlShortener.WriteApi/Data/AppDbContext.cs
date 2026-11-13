@@ -3,6 +3,10 @@ using UrlShortener.Core.Entities;
 
 namespace UrlShortener.WriteApi.Data
 {
+    /// <summary>
+    /// The Entity Framework Core database context.
+    /// Configures the schema and the high-performance SQL sequence used for URL generation.
+    /// </summary>
     public class AppDbContext : DbContext
     {
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
@@ -13,6 +17,9 @@ namespace UrlShortener.WriteApi.Data
         {
             base.OnModelCreating(modelBuilder);
 
+            // Configures a database-level sequence starting at 100 billion.
+            // This ensures the resulting Base62 encoded strings are consistently at least 6-7 characters long,
+            // and provides extremely fast sequential ID generation without IDENTITY column locking overhead.
             modelBuilder.HasSequence<long>("UrlCounter")
                         .StartsAt(100_000_000_000)
                         .IncrementsBy(1);
@@ -20,9 +27,13 @@ namespace UrlShortener.WriteApi.Data
             modelBuilder.Entity<Url>(entity =>
             {
                 entity.HasKey(e => e.Id);
+
+                // Binds the primary key to the custom SQL sequence.
                 entity.Property(e => e.Id)
                       .HasDefaultValueSql("NEXT VALUE FOR UrlCounter");
 
+                // Enforces a unique constraint on the database level.
+                // This is critical to prevent race conditions if two concurrent requests attempt to reserve the same Custom Alias.
                 entity.HasIndex(e => e.ShortUrl).IsUnique();
                 entity.Property(e => e.ShortUrl).IsRequired().HasMaxLength(20);
 

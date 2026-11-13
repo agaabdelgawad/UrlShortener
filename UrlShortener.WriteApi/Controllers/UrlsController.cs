@@ -1,16 +1,19 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
-using System.Buffers.Text;
 using UrlShortener.Core.Entities;
 using UrlShortener.Core.Utils;
 using UrlShortener.WriteApi.Data;
 using UrlShortener.WriteApi.DTOs;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace UrlShortener.WriteApi.Controllers
 {
+    /// <summary>
+    /// Handles the "Command" side of the CQRS architecture.
+    /// Responsible for state mutations: creating, updating, and soft-deleting URLs.
+    /// Uses Entity Framework Core for transactional integrity and interacts with Redis 
+    /// strictly for Cache Invalidation to keep the Read API synchronized.
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     public class UrlsController : ControllerBase
@@ -26,6 +29,12 @@ namespace UrlShortener.WriteApi.Controllers
             _redisDb = redisMuxer.GetDatabase();
         }
 
+        /// <summary>
+        /// Creates a new shortened URL or registers a custom alias.
+        /// Implements a retry mechanism (Collision Handling) for Base62 generation to ensure high availability
+        /// in concurrent environments. Pre-fetches the SQL Sequence to generate the URL-safe string before database insertion.
+        /// </summary>
+        /// <param name="request">The DTO containing the original URL, optional custom alias, and optional expiration date.</param>
         [HttpPost]
         public async Task<IActionResult> ShortenUrl([FromBody] ShortenUrlRequestDto request)
         {
@@ -93,6 +102,11 @@ namespace UrlShortener.WriteApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Manually fetches the next value from the high-performance SQL Server sequence.
+        /// Architecturally required because EF Core natively assigns sequence values during SaveChanges, 
+        /// but the system design dictates that the ID must be known upfront to generate the Base62 ShortUrl.
+        /// </summary>
         private async Task<long> GetNextSequenceValueAsync()
         {
             long nextValue = 0;
@@ -127,6 +141,11 @@ namespace UrlShortener.WriteApi.Controllers
             return nextValue;
         }
 
+        /// <summary>
+        /// Soft-deletes a URL to preserve historical data and analytics.
+        /// Architecturally critical: Immediately invalidates the Redis cache (Cache Invalidation) to ensure the Read API 
+        /// stops redirecting traffic to this logically deleted link on the very next request.
+        /// </summary>
         [HttpDelete("{shortUrl}")]
         public async Task<IActionResult> DeleteUrl(string shortUrl)
         {
@@ -145,6 +164,11 @@ namespace UrlShortener.WriteApi.Controllers
             return Ok("Url deleted successfully.");
         }
 
+        /// <summary>
+        /// Updates the expiration date of an existing URL.
+        /// Triggers Cache Invalidation to force the Read API to fall back to the database, 
+        /// recalculate the new TTL, and prevent stale expiration states from surviving in the cache.
+        /// </summary>
         [HttpPatch("{shortUrl}/expiration")]
         public async Task<IActionResult> UpdateExpiration(string shortUrl, [FromBody] UpdateExpirationDto dto)
         {
@@ -157,6 +181,7 @@ namespace UrlShortener.WriteApi.Controllers
 
             url.ExpirationDate = dto.NewExpirationDate;
             await _context.SaveChangesAsync();
+
 
             await _redisDb.KeyDeleteAsync(shortUrl);
 
