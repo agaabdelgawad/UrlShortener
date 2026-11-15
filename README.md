@@ -10,6 +10,13 @@ A high-performance, enterprise-grade URL Shortener built with **C# and .NET**. T
 
 ---
 
+### 🏗️ Architecture Diagram
+Below is the high-level system design outlining the functional and non-functional requirements, targeting **100M DAU** and **1B URLs**, and detailing the request flow through the API Gateway to the independent Read and Write services.
+
+![System Architecture](Docs/url-shortener-architecture-diagram.png)
+
+---
+
 ### ✨ App Features
 - **Custom Aliases & Auto-Generation:** Create custom vanity URLs or let the system auto-generate highly compact **Base62** strings.
 - **Lightning Fast Redirects:** Sub-millisecond redirection by fetching URLs directly from the Redis Cache.
