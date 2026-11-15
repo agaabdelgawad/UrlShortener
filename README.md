@@ -61,4 +61,4 @@ If you're interested in Software Engineering, Backend Architecture, or AEC Infor
 - [GitHub Profile](https://github.com/agaabdelgawad)
 
 ---
-*If you find this project useful for learning CQRS, YARP, or Redis integration, feel free to give it a ⭐!*
+*If you found this project interesting or helpful, feel free to give it a ⭐!*
