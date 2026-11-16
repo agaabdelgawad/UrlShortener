@@ -2,11 +2,17 @@ using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using StackExchange.Redis;
 using UrlShortener.WriteApi.Data;
+using UrlShortener.WriteApi.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddOptions<UrlShortenerSettings>()
+    .BindConfiguration("UrlShortenerSettings")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 var redisConnection = builder.Configuration.GetConnectionString("Redis");
 

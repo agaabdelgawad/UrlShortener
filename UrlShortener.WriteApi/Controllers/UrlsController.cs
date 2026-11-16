@@ -1,10 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using HashidsNet;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using UrlShortener.Core.Entities;
 using UrlShortener.Core.Utils;
 using UrlShortener.WriteApi.Data;
 using UrlShortener.WriteApi.DTOs;
+using UrlShortener.WriteApi.Settings;
 
 namespace UrlShortener.WriteApi.Controllers
 {
@@ -19,20 +22,20 @@ namespace UrlShortener.WriteApi.Controllers
     public class UrlsController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IConfiguration _configuration;
         private readonly IDatabase _redisDb;
+        private readonly UrlShortenerSettings _settings;
 
-        public UrlsController(AppDbContext context, IConfiguration configuration, IConnectionMultiplexer redisMuxer)
+        public UrlsController(AppDbContext context, IConnectionMultiplexer redisMuxer, IOptions<UrlShortenerSettings> options)
         {
             _context = context;
-            _configuration = configuration;
+            _settings = options.Value;
             _redisDb = redisMuxer.GetDatabase();
         }
 
         /// <summary>
         /// Creates a new shortened URL or registers a custom alias.
-        /// Implements a retry mechanism (Collision Handling) for Base62 generation to ensure high availability
-        /// in concurrent environments. Pre-fetches the SQL Sequence to generate the URL-safe string before database insertion.
+        /// Uses Hashids for ID Obfuscation to prevent URL predictable scraping.
+        /// Implements Write-Through Caching to Redis to handle eventual consistency.
         /// </summary>
         /// <param name="request">The DTO containing the original URL, optional custom alias, and optional expiration date.</param>
         [HttpPost]
@@ -53,17 +56,20 @@ namespace UrlShortener.WriteApi.Controllers
                 urlId = await GetNextSequenceValueAsync();
                 generatedShortUrl = request.CustomAlias;
             }
-            // Scenario 2: Auto-generate Short URL using Base62 with Collision Handling
+            // Scenario 2: Auto-generate Short URL using Hashids (ID Obfuscation)
             else
             {
                 bool isUnique = false;
                 int maxRetries = 5;
                 int attempts = 0;
 
+                // Obfuscation: Replace Base62 with Hashids
+                var hashids = new Hashids(_settings.HashidsSalt, minHashLength: 7);
+
                 while (!isUnique && attempts < maxRetries)
                 {
                     urlId = await GetNextSequenceValueAsync();
-                    generatedShortUrl = Base62Converter.Encode(urlId);
+                    generatedShortUrl = hashids.EncodeLong(urlId);
 
                     var exists = await _context.Urls.AnyAsync(u => u.ShortUrl == generatedShortUrl);
                     if (!exists)
@@ -91,8 +97,17 @@ namespace UrlShortener.WriteApi.Controllers
             _context.Urls.Add(newUrl);
             await _context.SaveChangesAsync();
 
-            var baseUrl = _configuration["UrlShortenerSettings:BaseUrl"];
-            var finalUrl = $"{baseUrl}{generatedShortUrl}";
+            // Write-Through Cache: Save to Redis immediately after DB save
+            TimeSpan cacheExpiry = TimeSpan.FromHours(24);
+            if (request.ExpirationDate.HasValue)
+            {
+                var timeUntilExpiration = request.ExpirationDate.Value - DateTime.UtcNow;
+                cacheExpiry = timeUntilExpiration < cacheExpiry ? timeUntilExpiration : cacheExpiry;
+            }
+
+            await _redisDb.StringSetAsync(generatedShortUrl, request.OriginalUrl, cacheExpiry);
+
+            var finalUrl = $"{_settings.BaseUrl}{generatedShortUrl}";
 
             return Ok(new
             {
@@ -128,9 +143,9 @@ namespace UrlShortener.WriteApi.Controllers
 
                 nextValue = Convert.ToInt64(result);
 
-                if (nextValue < 100_000_000_000)
+                if (nextValue <= 0)
                 {
-                    throw new InvalidOperationException($"Critical Error: Invalid sequence value generated: {nextValue}");
+                    throw new InvalidOperationException($"Critical Error: Invalid sequence value generated from database: {nextValue}");
                 }
             }
             finally

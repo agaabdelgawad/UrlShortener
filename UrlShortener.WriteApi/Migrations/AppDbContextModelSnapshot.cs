@@ -22,8 +22,7 @@ namespace UrlShortener.WriteApi.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.HasSequence("UrlCounter")
-                .StartsAt(100000000000L);
+            modelBuilder.HasSequence("UrlCounter");
 
             modelBuilder.Entity("UrlShortener.Core.Entities.Url", b =>
                 {
