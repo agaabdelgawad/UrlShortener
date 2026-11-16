@@ -17,11 +17,12 @@ namespace UrlShortener.WriteApi.Data
         {
             base.OnModelCreating(modelBuilder);
 
-            // Configures a database-level sequence starting at 100 billion.
-            // This ensures the resulting Base62 encoded strings are consistently at least 6-7 characters long,
-            // and provides extremely fast sequential ID generation without IDENTITY column locking overhead.
+            // Configures a database-level sequence starting at 1.
+            // We no longer need to start at a massive number because Hashids automatically pads 
+            // the output to our desired length (minHashLength: 7).
+            // This provides extremely fast sequential ID generation without IDENTITY column locking overhead.
             modelBuilder.HasSequence<long>("UrlCounter")
-                        .StartsAt(100_000_000_000)
+                        .StartsAt(1)
                         .IncrementsBy(1);
 
             modelBuilder.Entity<Url>(entity =>
